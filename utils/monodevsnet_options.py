@@ -108,7 +108,7 @@ class MonoDEVSOptions(MonodepthOptions):
                                  type=str,
                                  help="dataset to train on",
                                  default="kitti",
-                                 choices=["kitti", "kitti_odom", "kitti_depth", "kitti_test"])
+                                 choices=["kitti", "kitti_odom", "kitti_depth", "kitti_test", "gopro"])
         self.parser.add_argument("--syn_dataset",
                                  type=str,
                                  help="dataset to train on",

@@ -258,8 +258,9 @@ class DepthDataset(data.Dataset):
             inputs[("K", scale)] = torch.from_numpy(K)
             inputs[("inv_K", scale)] = torch.from_numpy(inv_K)
 
+
         if do_color_aug:
-            color_aug = transforms.ColorJitter.get_params(
+            color_aug = transforms.ColorJitter(
                 self.brightness, self.contrast, self.saturation, self.hue)
         else:
             color_aug = (lambda x: x)
@@ -382,7 +383,7 @@ class VK1Dataset(DepthDataset, ABC):
         segm = segm_copy.astype(np.int32) + 1
         segm[segm > 16] = 0
 
-        return segm.astype(np.long)
+        return segm.astype(np.compat.long)
 
 
 class VK2Dataset(DepthDataset, ABC):
@@ -441,4 +442,4 @@ class VK2Dataset(DepthDataset, ABC):
         segm = segm_copy.astype(np.int32) + 1
         segm[segm > 16] = 0
 
-        return segm.astype(np.long)
+        return segm.astype(np.compat.long)
