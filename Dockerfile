@@ -1,4 +1,6 @@
-FROM nvidia/cuda:10.2-cudnn7-devel
+ARG IMAGE_BASE
+
+FROM ${IMAGE_BASE}
 
 RUN apt-get update && DEBIAN_FRONTEND="noninteractive" apt-get install -y \
         python3-opencv python3.6 python3.6-dev git wget sudo python3-distutils

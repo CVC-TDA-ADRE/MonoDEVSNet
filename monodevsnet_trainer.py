@@ -164,19 +164,20 @@ class MonoDEVSNetTrainer(Trainer):
                                                    height=self.opt.height, width=self.opt.width,
                                                    frame_idxs=[0], num_scales=4, is_train=False, img_ext=img_ext)
         else:
-            real_filenames = glob(os.path.join(self.opt.real_data_path,'*.jpg'))
+            real_filenames = [glob(os.path.join(folder,'*.jpg'))[1:-1] for folder in glob(os.path.join(self.opt.real_data_path,'*'))]
+            real_filenames = [el for sublist in real_filenames for el in sublist]
 
             real_train_dataset = self.real_dataset(data_path=self.opt.real_data_path, filenames=real_filenames,
                                                    height=self.opt.height, width=self.opt.width,
                                                    frame_idxs=self.opt.frame_ids, num_scales=4, is_train=True,
                                                    img_ext=img_ext)
 
-            real_val_dataset = self.real_dataset(data_path=self.opt.real_data_path, filenames=real_filenames,
+            real_val_dataset = self.real_dataset(data_path=self.opt.real_data_path, filenames=real_filenames[:300],
                                              height=self.opt.height, width=self.opt.width,
                                              frame_idxs=self.opt.frame_ids, num_scales=4, is_train=False,
                                              img_ext=img_ext)
 
-            real_eigen_val_dataset = self.real_dataset(data_path=self.opt.real_data_path, filenames=real_filenames,
+            real_eigen_val_dataset = self.real_dataset(data_path=self.opt.real_data_path, filenames=real_filenames[:300],
                                                    height=self.opt.height, width=self.opt.width,
                                                    frame_idxs=[0], num_scales=4, is_train=False, img_ext=img_ext)
         # Validation data-set and data-loader
@@ -413,8 +414,8 @@ class MonoDEVSNetTrainer(Trainer):
 
             if self.early_phase or self.mid_phase or self.late_phase:
                 self.log("train", inputs, outputs, losses)
-                #self.val("real")
-                #self.val("syn")
+                self.val("real")
+                self.val("syn")
 
             if (batch_idx + 1) % 2 == 0:
                 current_lr = self.update_learning_rate(self.model_optimizer, self.opt.learning_rate)
@@ -590,22 +591,24 @@ class MonoDEVSNetTrainer(Trainer):
                 writer.add_scalar("{}".format(l), v, self.step)
 
         for j in [0]:  # range(min(4, self.opt.batch_size)):  # write a maximum of four images
-            writer.add_image(
-                "depth_gt_{}/{}".format(0, j),
-                normalize_image(inputs["depth_gt"][j]), self.step)
+            if "depth_gt" in inputs.keys():
+                writer.add_image(
+                    "depth_gt_{}/{}".format(0, j),
+                    normalize_image(inputs["depth_gt"][j]), self.step)
+
+                diff = torch.abs(F.interpolate(inputs["depth_gt"] / self.opt.syn_scaling_factor,
+                                           [self.opt.height, self.opt.width], mode="bilinear", align_corners=False)[j]
+                             - outputs[("depth", 0, 0)][j])
+                mask = F.interpolate((inputs["depth_gt"][j] > 0).float().unsqueeze(0), diff.shape[1:]).squeeze()
+                diff = diff * mask.float()
+                writer.add_image(
+                    "abs_depth_diff_{}/{}".format(0, j),
+                    normalize_image(diff), self.step)
 
             writer.add_image(
                 "depth_pred_{}/{}".format(0, j),
                 normalize_image(outputs[("depth", 0, 0)][j]), self.step)
 
-            diff = torch.abs(F.interpolate(inputs["depth_gt"] / self.opt.syn_scaling_factor,
-                                           [self.opt.height, self.opt.width], mode="bilinear", align_corners=False)[j]
-                             - outputs[("depth", 0, 0)][j])
-            mask = F.interpolate((inputs["depth_gt"][j] > 0).float().unsqueeze(0), diff.shape[1:]).squeeze()
-            diff = diff * mask.float()
-            writer.add_image(
-                "abs_depth_diff_{}/{}".format(0, j),
-                normalize_image(diff), self.step)
 
             for s in [0]:  # self.opt.scales:
                 frame_ids = [0]  # For time being

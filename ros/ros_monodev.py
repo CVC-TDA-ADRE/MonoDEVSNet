@@ -35,8 +35,9 @@ class DevMonoDepth(Node):
             parameters=[
                 ('topic_in', 'image'),
                 ('topic_out', 'depth'),
-                ('config_file', None),
-                ('weights_file', None),
+                ('config_file', ""),
+                ('weights_file', ""),
+                ('path_out', ""),
                 ('gpu', 0),
                 ('queue_pub', 10),
                 ('queue_sub', 10),
@@ -46,6 +47,7 @@ class DevMonoDepth(Node):
         # get parameters
         topic_in = self.get_parameter('topic_in').get_parameter_value().string_value
         topic_out = self.get_parameter('topic_out').get_parameter_value().string_value
+        self.path_put = self.get_parameter('path_out').get_parameter_value().string_value
         config_file = self.get_parameter('config_file').get_parameter_value().string_value
         weights_file = self.get_parameter('weights_file').get_parameter_value().string_value
         gpu = self.get_parameter('gpu').get_parameter_value().integer_value
@@ -83,8 +85,22 @@ class DevMonoDepth(Node):
         # transform message
         img = self.cv_br.imgmsg_to_cv2(msg)
 
-        # segment image
+        # estimate depth image
         depth = self._run_model(img)
+        depth = np.clip(depth, 0, 80)
+
+        # save image to disk
+        if self.path_out != "":
+            if not os.path.join(os.path.join(self.path_out,'rgb')):
+                os.makedirs(os.path.join(self.path_out,'rgb'))
+            if not os.path.join(os.path.join(self.path_out,'depth')):
+                os.makedirs(os.path.join(self.path_out,'depth'))
+
+            depth = cv2.applyColorMap(np.asarray((255. * depth) / 80, dtype=np.uint8), cv2.COLORMAP_JET)
+            filename_out = os.path.join(self.path_out,'depth/%09d.jpg' % int(msg.header.frame_id))
+            cv2.imwrite(filename_out, depth)
+            filename_out = os.path.join(self.path_out,'rgb/%09d.jpg' % int(msg.header.frame_id))
+            cv2.imwrite(filename_out, img[..., ::-1])
 
         # publish results
         img_msg = self.cv_br.cv2_to_imgmsg(depth)
