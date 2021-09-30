@@ -52,11 +52,12 @@ from torch import optim, nn
 from torch.utils.data import DataLoader
 from torch.nn import functional as F
 from tqdm import tqdm
+from glob import glob
 
 import networks
 import monodepth2
 from datasets_EXT import VK1Dataset, VK2Dataset
-from monodepth2 import KITTIRAWDataset, KITTIDepthDataset, KITTIOdomDataset
+from monodepth2 import KITTIRAWDataset, KITTIDepthDataset, KITTIOdomDataset, GOPRORAWDataset
 from monodepth2.evaluate_depth import compute_errors
 from monodepth2.layers import disp_to_depth, compute_depth_errors
 from monodepth2.trainer import Trainer
@@ -131,7 +132,8 @@ class MonoDEVSNetTrainer(Trainer):
                          "kitti_odom": KITTIOdomDataset,
                          "kitti_depth": KITTIDepthDataset,
                          "vk_1.0": VK1Dataset,
-                         "vk_2.0": VK2Dataset}
+                         "vk_2.0": VK2Dataset,
+                         "gopro": GOPRORAWDataset}
         self.real_dataset = datasets_dict[self.opt.real_dataset]
         self.syn_dataset = datasets_dict[self.opt.syn_dataset]
 
@@ -139,28 +141,46 @@ class MonoDEVSNetTrainer(Trainer):
         syn_train_dataset = self.syn_dataset(self.opt, csv_file_path=syn_f_path, frame_ids=[0],
                                              num_scales=4, is_train=True)
 
-        real_f_path = os.path.join(os.path.dirname(__file__), "monodepth2/splits", self.opt.split, "{}_files.txt")
-        real_filenames = readlines(real_f_path.format("train"))
-        real_train_dataset = self.real_dataset(data_path=self.opt.real_data_path, filenames=real_filenames,
-                                               height=self.opt.height, width=self.opt.width,
-                                               frame_idxs=self.opt.frame_ids, num_scales=4, is_train=True,
-                                               img_ext=img_ext)
+        if self.opt.real_dataset == 'kitti' or self.opt.real_dataset == 'kitti_odom' or self.opt.real_dataset == 'kitti_depth':
+            real_f_path = os.path.join(os.path.dirname(__file__), "monodepth2/splits", self.opt.split, "{}_files.txt")
+            real_filenames = readlines(real_f_path.format("train"))
 
-        # Validation data-set and data-loader
-        syn_val_dataset = self.syn_dataset(self.opt, csv_file_path=syn_f_path, frame_ids=[0],
-                                           num_scales=4, is_train=False)
-        real_filenames = readlines(real_f_path.format("val"))
-        real_val_dataset = self.real_dataset(data_path=self.opt.real_data_path, filenames=real_filenames,
+            real_train_dataset = self.real_dataset(data_path=self.opt.real_data_path, filenames=real_filenames,
+                                                   height=self.opt.height, width=self.opt.width,
+                                                   frame_idxs=self.opt.frame_ids, num_scales=4, is_train=True,
+                                                   img_ext=img_ext)
+
+            real_filenames = readlines(real_f_path.format("val"))
+            real_val_dataset = self.real_dataset(data_path=self.opt.real_data_path, filenames=real_filenames,
                                              height=self.opt.height, width=self.opt.width,
                                              frame_idxs=self.opt.frame_ids, num_scales=4, is_train=False,
                                              img_ext=img_ext)
 
-        real_f_path = os.path.join(os.path.dirname(__file__), "monodepth2/splits", "eigen", "{}_files.txt")
-        real_eigen_filenames = readlines(real_f_path.format("test"))
-        real_eigen_val_dataset = self.real_dataset(data_path=self.opt.real_data_path, filenames=real_eigen_filenames,
+            real_f_path = os.path.join(os.path.dirname(__file__), "monodepth2/splits", "eigen", "{}_files.txt")
+            real_eigen_filenames = readlines(real_f_path.format("test"))
+            real_eigen_val_dataset = self.real_dataset(data_path=self.opt.real_data_path, filenames=real_eigen_filenames,
                                                    height=self.opt.height, width=self.opt.width,
                                                    frame_idxs=[0], num_scales=4, is_train=False, img_ext=img_ext)
+        else:
+            real_filenames = [glob(os.path.join(folder,'*.jpg'))[1:-1] for folder in glob(os.path.join(self.opt.real_data_path,'*'))]
+            real_filenames = [el for sublist in real_filenames for el in sublist]
 
+            real_train_dataset = self.real_dataset(data_path=self.opt.real_data_path, filenames=real_filenames,
+                                                   height=self.opt.height, width=self.opt.width,
+                                                   frame_idxs=self.opt.frame_ids, num_scales=4, is_train=True,
+                                                   img_ext=img_ext)
+
+            real_val_dataset = self.real_dataset(data_path=self.opt.real_data_path, filenames=real_filenames[:300],
+                                             height=self.opt.height, width=self.opt.width,
+                                             frame_idxs=self.opt.frame_ids, num_scales=4, is_train=False,
+                                             img_ext=img_ext)
+
+            real_eigen_val_dataset = self.real_dataset(data_path=self.opt.real_data_path, filenames=real_filenames[:300],
+                                                   height=self.opt.height, width=self.opt.width,
+                                                   frame_idxs=[0], num_scales=4, is_train=False, img_ext=img_ext)
+        # Validation data-set and data-loader
+        syn_val_dataset = self.syn_dataset(self.opt, csv_file_path=syn_f_path, frame_ids=[0],
+                                           num_scales=4, is_train=False)
         # Training data-loaders
         self.real_train_loader = DataLoader(
             real_train_dataset, self.opt.batch_size, True,
@@ -390,7 +410,7 @@ class MonoDEVSNetTrainer(Trainer):
 
             if self.early_phase or self.mid_phase or self.late_phase:
                 self.log("train", inputs, outputs, losses)
-                self.val("real")
+                # self.val("real")
                 self.val("syn")
 
             if (batch_idx + 1) % 2 == 0:
@@ -567,22 +587,25 @@ class MonoDEVSNetTrainer(Trainer):
                 writer.add_scalar("{}".format(l), v, self.step)
 
         for j in [0]:  # range(min(4, self.opt.batch_size)):  # write a maximum of four images
-            writer.add_image(
-                "depth_gt_{}/{}".format(0, j),
-                normalize_image(inputs["depth_gt"][j]), self.step)
 
             writer.add_image(
                 "depth_pred_{}/{}".format(0, j),
                 normalize_image(outputs[("depth", 0, 0)][j]), self.step)
 
-            diff = torch.abs(F.interpolate(inputs["depth_gt"] / self.opt.syn_scaling_factor,
-                                           [self.opt.height, self.opt.width], mode="bilinear", align_corners=False)[j]
-                             - outputs[("depth", 0, 0)][j])
-            mask = F.interpolate((inputs["depth_gt"][j] > 0).float().unsqueeze(0), diff.shape[1:]).squeeze()
-            diff = diff * mask.float()
-            writer.add_image(
-                "abs_depth_diff_{}/{}".format(0, j),
-                normalize_image(diff), self.step)
+            if "depth_gt" in inputs.keys():
+                writer.add_image(
+                    "depth_gt_{}/{}".format(0, j),
+                    normalize_image(inputs["depth_gt"][j]), self.step)
+
+
+                diff = torch.abs(F.interpolate(inputs["depth_gt"] / self.opt.syn_scaling_factor,
+                                               [self.opt.height, self.opt.width], mode="bilinear", align_corners=False)[j]
+                                 - outputs[("depth", 0, 0)][j])
+                mask = F.interpolate((inputs["depth_gt"][j] > 0).float().unsqueeze(0), diff.shape[1:]).squeeze()
+                diff = diff * mask.float()
+                writer.add_image(
+                    "abs_depth_diff_{}/{}".format(0, j),
+                    normalize_image(diff), self.step)
 
             for s in [0]:  # self.opt.scales:
                 frame_ids = [0]  # For time being

@@ -90,6 +90,7 @@ class DensenetPyramidEncoder(nn.Module):
 
     def __init__(self, densnet_version=121, pretrained_weights=True):
         super(DensenetPyramidEncoder, self).__init__()
+
         if 121 == densnet_version:
             self.densenet = densenet121(pretrained=pretrained_weights)
             layers = [6, 12, 24, 16]
@@ -130,7 +131,7 @@ class DensenetPyramidEncoder(nn.Module):
         # pyramid of feature maps
         feats_pyramid_0 = densenet_feats[0]
         feats_pyramid_0 = F.interpolate(
-            feats_pyramid_0, size=[np.int(h / 2), np.int(w / 2)], mode='bilinear', align_corners=True)
+            feats_pyramid_0, size=[np.int32(h / 2), np.int32(w / 2)], mode='bilinear', align_corners=True)
 
         feats_pyramid_1 = densenet_feats[1]
         feats_pyramid_2 = densenet_feats[2]
