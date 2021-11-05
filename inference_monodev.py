@@ -82,7 +82,7 @@ def _init_model(config, weights_file, models_fcn_name, num_layers, scales):
 def _run_model(img, models):
     # prepare data
     h, w, _ = np.shape(img)
-    img = cv2.resize(img, (320, 192), interpolation=cv2.INTER_LINEAR)
+    img = cv2.resize(img, (640, 192), interpolation=cv2.INTER_NEAREST)
     img = torch.tensor(np.array(img, dtype=np.float32) / 255).permute(2, 0, 1).unsqueeze(0).to(torch.device("cuda"))
 
     # compute depth
@@ -94,7 +94,7 @@ def _run_model(img, models):
     pred_disp = 1 / 80. + (1 / 0.1 - 1 / 80.) * output[("disp", 0)].detach()
     pred_disp = pred_disp[0, 0].cpu().numpy()
     pred_depth_raw = 3. / pred_disp.copy()
-    pred_depth_raw = cv2.resize(pred_depth_raw, (w, h), interpolation=cv2.INTER_LINEAR)
+    pred_depth_raw = cv2.resize(pred_depth_raw, (w, h), interpolation=cv2.INTER_NEAREST)
 
     return pred_depth_raw
 
@@ -102,7 +102,8 @@ def _run_model(img, models):
 def mini_loop(img, models, path_out, name_file, color=False):
     # get depth img
     depth = _run_model(img, models)
-    depth = np.clip(depth, 0, 80)
+    depth = np.asarray(depth * 256, dtype=np.uint16)
+    depth = np.clip(depth, 0, 80 * 256)
     if color:
         depth = cv2.applyColorMap(np.asarray((255. * depth) / 80, dtype=np.uint8), cv2.COLORMAP_JET)
 
