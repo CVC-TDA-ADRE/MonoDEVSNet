@@ -2,11 +2,17 @@ import time
 
 import networks
 import cv2
+from PIL import Image
 import numpy as np
 import torch
 import yaml
 import os
 import argparse
+from torchvision import transforms
+from torch.nn import functional as F
+
+MAX_DEPTH = 80.
+MIN_DEPTH = 0.1
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -17,6 +23,7 @@ def parse_args():
     parser.add_argument('--files_list', type=str)
     parser.add_argument('--models_fcn_name', type=str, default='HRNet')
     parser.add_argument('--num_layers', type=int)
+    parser.add_argument('--hr', action='store_true') 
     parser.add_argument('--scales', type=int, default=4)
     parser.add_argument('--color', action='store_true')
     parser.set_defaults(color=False)
@@ -64,7 +71,7 @@ def _init_model(config, weights_file, models_fcn_name, num_layers, scales):
 
     # Paths to the models
     print(weights_file)
-    encoder_path = os.path.join(weights_file, "depth_encoder.pth")
+    encoder_path = os.path.join(weights_file, "encoder.pth")
     decoder_path = os.path.join(weights_file, "depth_decoder.pth")
 
     # Load model weights
@@ -82,7 +89,9 @@ def _init_model(config, weights_file, models_fcn_name, num_layers, scales):
 def _run_model(img, models):
     # prepare data
     h, w, _ = np.shape(img)
-    img = cv2.resize(img, (640, 192), interpolation=cv2.INTER_NEAREST)
+    input_res = (384, 1248) if args.hr else (192, 640)
+    resize = transforms.Resize(input_res, interpolation=Image.ANTIALIAS)
+    img = resize(img)
     img = torch.tensor(np.array(img, dtype=np.float32) / 255).permute(2, 0, 1).unsqueeze(0).to(torch.device("cuda"))
 
     # compute depth
@@ -91,19 +100,28 @@ def _run_model(img, models):
     output = models["depth_decoder"](features)
 
     # Convert disparity into depth maps
-    pred_disp = 1 / 80. + (1 / 0.1 - 1 / 80.) * output[("disp", 0)].detach()
+    pred_disp = 1 / MAX_DEPTH + (1 / MIN_DEPTH - 1 / MAX_DEPTH) * output[("disp", 0)]
     pred_disp = pred_disp[0, 0].cpu().numpy()
     pred_depth_raw = 3. / pred_disp.copy()
-    pred_depth_raw = cv2.resize(pred_depth_raw, (w, h), interpolation=cv2.INTER_NEAREST)
+    # pred_depth_raw = cv2.resize(pred_depth_raw, (w, h), interpolation=cv2.INTER_NEAREST)
 
-    return pred_depth_raw
+    pred_depth_t = torch.tensor(pred_depth_raw).unsqueeze(0).unsqueeze(0)
+    pred_depth_t[pred_depth_t < MIN_DEPTH] = MIN_DEPTH
+    pred_depth_t[pred_depth_t > MAX_DEPTH] = MAX_DEPTH
+
+    pred_depth_o = Image.fromarray(np.array(F.interpolate(pred_depth_t,
+                                                          (h, w)).squeeze() * 256,
+                                                          dtype=np.uint16))
+
+    return pred_depth_o
 
 
 def mini_loop(img, models, path_out, name_file, color=False):
     # get depth img
-    depth = _run_model(img, models)
-    depth = np.asarray(depth * 256, dtype=np.uint16)
-    depth = np.clip(depth, 0, 80 * 256)
+    with torch.no_grad():
+        depth = _run_model(img, models)
+    # depth = np.asarray(depth * 256, dtype=np.uint16)
+    # depth = np.clip(depth, 0, 80 * 256)
     if color:
         depth = cv2.applyColorMap(np.asarray((255. * depth) / 80, dtype=np.uint8), cv2.COLORMAP_JET)
 
@@ -112,7 +130,8 @@ def mini_loop(img, models, path_out, name_file, color=False):
         os.makedirs(os.path.join(path_out,'depth'))
 
     filename_out = os.path.join(path_out,'%s' % name_file)
-    cv2.imwrite(filename_out, depth)
+    # cv2.imwrite(filename_out, depth)
+    depth.save(filename_out)
 
 def main(args):
     config = _init_args(args.config_file, args.weights_file)
@@ -124,7 +143,7 @@ def main(args):
         v_files = [line.rstrip() for line in f.readlines()]
 
     for file_idx, file in enumerate(v_files):
-        img = cv2.imread(file)
+        img = Image.open(file).convert('RGB')
         name_file = file.split('/')[-1]
         mini_loop(img, models, args.path_out, name_file, color=args.color)
 
